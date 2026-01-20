@@ -15,6 +15,8 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.util.Disposer
+import com.intellij.psi.JavaPsiFacade
+import com.intellij.psi.search.GlobalSearchScope
 import com.zatlas.mcpbridge.models.TestCaseResult
 import com.zatlas.mcpbridge.models.TestResult
 import com.zatlas.mcpbridge.models.TestStatus
@@ -129,11 +131,40 @@ class TestHandler {
             // Parse the pattern and configure appropriately
             when {
                 pattern.contains("#") -> {
-                    // Method test: "MyTest#testMethod" or "com.example.MyTest#testMethod"
-                    val (className, methodName) = pattern.split("#", limit = 2)
-                    config.persistentData.TEST_OBJECT = JUnitConfiguration.TEST_METHOD
-                    config.persistentData.MAIN_CLASS_NAME = resolveClassName(project, className)
-                    config.persistentData.METHOD_NAME = methodName
+                    // Method test formats:
+                    // - "MyTest#testMethod" - direct method
+                    // - "MyTest$NestedClass#testMethod" - nested class method
+                    // - "com.example.MyTest$Nested Class#test method" - with spaces (Kotlin)
+                    val (classPath, methodName) = pattern.split("#", limit = 2)
+
+                    // Check if it's a nested class pattern (contains $ separator)
+                    val hasNestedClass = classPath.contains("$")
+                    val (mainClass, nestedClass) = if (hasNestedClass) {
+                        val parts = classPath.split("$", limit = 2)
+                        Pair(parts[0], parts[1])
+                    } else {
+                        Pair(classPath, null)
+                    }
+
+                    val resolvedClass = resolveClassName(project, mainClass)
+
+                    // Use TEST_UNIQUE_ID for Kotlin tests (display names with spaces or nested classes)
+                    if (methodName.contains(" ") || hasNestedClass) {
+                        config.persistentData.TEST_OBJECT = JUnitConfiguration.TEST_UNIQUE_ID
+                        val uniqueId = if (nestedClass != null) {
+                            // Nested class: [engine:junit-jupiter]/[class:fqcn]/[nested-class:Name]/[method:name()]
+                            "[engine:junit-jupiter]/[class:$resolvedClass]/[nested-class:$nestedClass]/[method:$methodName()]"
+                        } else {
+                            // Direct method: [engine:junit-jupiter]/[class:fqcn]/[method:name()]
+                            "[engine:junit-jupiter]/[class:$resolvedClass]/[method:$methodName()]"
+                        }
+                        config.persistentData.setUniqueIds(uniqueId)
+                        log.info("Using unique ID for test: $uniqueId")
+                    } else {
+                        config.persistentData.TEST_OBJECT = JUnitConfiguration.TEST_METHOD
+                        config.persistentData.MAIN_CLASS_NAME = resolvedClass
+                        config.persistentData.METHOD_NAME = methodName
+                    }
                 }
                 pattern.endsWith("*") -> {
                     // Package test: "com.example.*"
@@ -141,8 +172,9 @@ class TestHandler {
                     config.persistentData.TEST_OBJECT = JUnitConfiguration.TEST_PACKAGE
                     config.persistentData.PACKAGE_NAME = packageName
                 }
-                pattern.contains(".") && !pattern.endsWith("Test") -> {
+                pattern.contains(".") && !pattern.endsWith("Test") && !pattern.contains("Test.") -> {
                     // Likely a package: "com.example.subpackage"
+                    // But not something like "com.example.MyTest.NestedClass"
                     config.persistentData.TEST_OBJECT = JUnitConfiguration.TEST_PACKAGE
                     config.persistentData.PACKAGE_NAME = pattern
                 }
@@ -172,9 +204,46 @@ class TestHandler {
             return className
         }
 
-        // Try to find the class in the project
-        // For now, just return the class name - IntelliJ will resolve it
-        return className
+        // Try to find the class in the project using PSI (must run in read action)
+        try {
+            return ApplicationManager.getApplication().runReadAction<String> {
+                val psiFacade = JavaPsiFacade.getInstance(project)
+                val scope = GlobalSearchScope.allScope(project)
+
+                // Search for classes with this short name
+                val classes = psiFacade.findClasses(className, scope)
+                if (classes.isNotEmpty()) {
+                    // Prefer test classes in test source roots
+                    val testClass = classes.find { it.qualifiedName?.contains("test", ignoreCase = true) == true }
+                        ?: classes.first()
+                    val qualifiedName = testClass.qualifiedName
+                    if (qualifiedName != null) {
+                        log.info("Resolved '$className' to '$qualifiedName'")
+                        return@runReadAction qualifiedName
+                    }
+                }
+
+                // Try with common test suffixes
+                val searchNames = listOf(className, "${className}Test", "${className}Tests")
+                for (searchName in searchNames) {
+                    val foundClasses = psiFacade.findClasses(searchName, scope)
+                    for (foundClass in foundClasses) {
+                        val qualifiedName = foundClass.qualifiedName
+                        if (qualifiedName != null) {
+                            log.info("Resolved '$className' to '$qualifiedName'")
+                            return@runReadAction qualifiedName
+                        }
+                    }
+                }
+
+                // Fallback: return as-is
+                log.warn("Could not resolve class name '$className', using as-is")
+                className
+            }
+        } catch (e: Exception) {
+            log.warn("Failed to resolve class name '$className': ${e.message}")
+            return className
+        }
     }
 
     private fun findModuleForTest(project: Project, pattern: String): com.intellij.openapi.module.Module? {
@@ -282,11 +351,11 @@ class TestHandler {
             log.warn("Failed to extract detailed test results", e)
         }
 
-        // If we couldn't extract detailed results, try to get basic counts
+        // If we couldn't extract detailed results, report appropriately
         if (tests.isEmpty()) {
-            // Check if there was an error in the process
             val processHandler = descriptor.processHandler
             val exitCode = processHandler?.exitCode ?: -1
+
             if (exitCode != 0) {
                 return TestResult(
                     success = false,
@@ -305,6 +374,17 @@ class TestHandler {
                     error = "Test process exited with code $exitCode"
                 )
             }
+
+            // No tests found - this is an error condition
+            return TestResult(
+                success = false,
+                passed = 0,
+                failed = 0,
+                skipped = 0,
+                timeMs = timeMs,
+                tests = emptyList(),
+                error = "No tests found matching the pattern. Check that the class/method name is correct and the test exists."
+            )
         }
 
         return TestResult(

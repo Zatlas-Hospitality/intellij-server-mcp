@@ -109,11 +109,14 @@ Benefits:
 - Maintains Spring context cache (fast after first run)
 - Consistent with your development environment
 
-Pattern formats:
-- "MyTest" - Run all tests in class MyTest
-- "MyTest#testMethod" - Run specific test method
+Pattern formats (use fully qualified class names for reliability):
+- "com.example.MyTest" - Run all tests in class (RECOMMENDED)
 - "com.example.*" - Run all tests in package
-- "com.example.MyTest" - Run tests in fully qualified class`,
+- "com.example.MyTest#testMethod" - Run specific test method
+- "com.example.MyTest$NestedClass#test method" - Nested class with Kotlin display name
+
+IMPORTANT: Simple class names (e.g., "MyTest") may not resolve correctly. Always use fully qualified class names.
+For Kotlin tests with backtick method names, use: "FullClass$Nested Class Name#method name"`,
             inputSchema: {
               type: "object",
               properties: {
@@ -238,6 +241,43 @@ Returns the accumulated console output, running status, and exit code (if termin
               required: [],
             },
           },
+          {
+            name: "intellij_plugin_reinstall",
+            description: `Reinstall the MCP Bridge plugin in IntelliJ IDEA from a built zip file.
+
+By default, uses the plugin at:
+~/zatlas_projects/mcp-intellij-server/intellij-plugin/build/distributions/intellij-plugin-1.0.0.zip
+
+After reinstall, IntelliJ must be restarted for changes to take effect.`,
+            inputSchema: {
+              type: "object",
+              properties: {
+                pluginPath: {
+                  type: "string",
+                  description: "Optional custom path to the plugin zip file",
+                },
+              },
+              required: [],
+            },
+          },
+          {
+            name: "intellij_plugin_restart",
+            description: "Restart IntelliJ IDEA to apply plugin changes.",
+            inputSchema: {
+              type: "object",
+              properties: {},
+              required: [],
+            },
+          },
+          {
+            name: "intellij_plugin_info",
+            description: "Get information about the installed MCP Bridge plugin.",
+            inputSchema: {
+              type: "object",
+              properties: {},
+              required: [],
+            },
+          },
         ],
       };
     });
@@ -289,6 +329,15 @@ Returns the accumulated console output, running status, and exit code (if termin
 
           case "intellij_projects":
             return await this.handleProjects();
+
+          case "intellij_plugin_reinstall":
+            return await this.handlePluginReinstall(args?.pluginPath as string | undefined);
+
+          case "intellij_plugin_restart":
+            return await this.handlePluginRestart();
+
+          case "intellij_plugin_info":
+            return await this.handlePluginInfo();
 
           default:
             return {
@@ -775,6 +824,76 @@ ${output}`,
         {
           type: "text",
           text: `Open projects:\n${projectList}`,
+        },
+      ],
+    };
+  }
+
+  private async handlePluginReinstall(pluginPath?: string) {
+    const result = await this.client.reinstallPlugin(pluginPath);
+
+    if (result.success) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `✓ ${result.message}${result.requiresRestart ? "\n\nUse intellij_plugin_restart to restart the IDE." : ""}`,
+          },
+        ],
+      };
+    } else {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `✗ ${result.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  private async handlePluginRestart() {
+    const result = await this.client.restartIde();
+
+    if (result.success) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `✓ ${result.message}
+
+Note: Connection will be lost during restart. Wait a few seconds and use intellij_status to verify reconnection.`,
+          },
+        ],
+      };
+    } else {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `✗ ${result.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  private async handlePluginInfo() {
+    const info = await this.client.getPluginInfo();
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Plugin Information:
+  ID: ${info.pluginId}
+  Name: ${info.name || "N/A"}
+  Version: ${info.version || "N/A"}
+  Installed: ${info.installed ? "Yes" : "No"}
+  Enabled: ${info.enabled ? "Yes" : "No"}`,
         },
       ],
     };

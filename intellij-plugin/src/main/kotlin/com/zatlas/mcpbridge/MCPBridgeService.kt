@@ -5,6 +5,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import com.zatlas.mcpbridge.handlers.CompileHandler
+import com.zatlas.mcpbridge.handlers.PluginHandler
 import com.zatlas.mcpbridge.handlers.RunConfigHandler
 import com.zatlas.mcpbridge.handlers.TestHandler
 import com.zatlas.mcpbridge.settings.MCPBridgeSettings
@@ -18,6 +19,7 @@ class MCPBridgeService : Disposable {
     private val compileHandler = CompileHandler()
     private val testHandler = TestHandler()
     private val runConfigHandler = RunConfigHandler()
+    private val pluginHandler = PluginHandler()
 
     @Volatile
     private var isRunning = false
@@ -37,7 +39,7 @@ class MCPBridgeService : Disposable {
 
         try {
             log.info("Starting MCP Bridge server on port $port")
-            httpServer = HttpServer.create(port, compileHandler, testHandler, runConfigHandler)
+            httpServer = HttpServer.create(port, compileHandler, testHandler, runConfigHandler, pluginHandler)
             isRunning = true
             log.info("MCP Bridge server started successfully on port $port")
         } catch (e: Exception) {

@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.zatlas.mcpbridge.handlers.CompileHandler
+import com.zatlas.mcpbridge.handlers.PluginHandler
 import com.zatlas.mcpbridge.handlers.RunConfigHandler
 import com.zatlas.mcpbridge.handlers.TestHandler
 import fi.iki.elonen.NanoHTTPD
@@ -13,7 +14,8 @@ class HttpServer(
     port: Int,
     private val compileHandler: CompileHandler,
     private val testHandler: TestHandler,
-    private val runConfigHandler: RunConfigHandler
+    private val runConfigHandler: RunConfigHandler,
+    private val pluginHandler: PluginHandler
 ) : NanoHTTPD(port) {
 
     private val gson = Gson()
@@ -36,6 +38,10 @@ class HttpServer(
                 uri == "/run/projects" && method == Method.GET -> handleListProjects()
                 uri.startsWith("/run/") && uri.endsWith("/output") && method == Method.GET -> handleRunOutput(session, uri)
                 uri.startsWith("/run/") && uri.endsWith("/stop") && method == Method.POST -> handleRunStop(uri)
+                // Plugin management endpoints
+                uri == "/plugin/reinstall" && method == Method.POST -> handlePluginReinstall(session)
+                uri == "/plugin/restart" && method == Method.POST -> handlePluginRestart()
+                uri == "/plugin/info" && method == Method.GET -> handlePluginInfo()
                 else -> jsonResponse(Response.Status.NOT_FOUND, mapOf(
                     "error" to "Not found",
                     "path" to uri,
@@ -50,7 +56,10 @@ class HttpServer(
                         "GET /run/list",
                         "GET /run/projects",
                         "GET /run/{runId}/output",
-                        "POST /run/{runId}/stop"
+                        "POST /run/{runId}/stop",
+                        "POST /plugin/reinstall",
+                        "POST /plugin/restart",
+                        "GET /plugin/info"
                     )
                 ))
             }
@@ -173,6 +182,31 @@ class HttpServer(
         )
     }
 
+    // Plugin management handlers
+    private fun handlePluginReinstall(session: IHTTPSession): Response {
+        val body = parseBody(session)
+        val pluginPath = body?.get("pluginPath")?.asString
+
+        val result = pluginHandler.reinstallPlugin(pluginPath)
+        return jsonResponse(
+            if (result.success) Response.Status.OK else Response.Status.INTERNAL_ERROR,
+            result
+        )
+    }
+
+    private fun handlePluginRestart(): Response {
+        val result = pluginHandler.restartIde()
+        return jsonResponse(
+            if (result.success) Response.Status.OK else Response.Status.INTERNAL_ERROR,
+            result
+        )
+    }
+
+    private fun handlePluginInfo(): Response {
+        val info = pluginHandler.getPluginInfo()
+        return jsonResponse(Response.Status.OK, info)
+    }
+
     private fun parseBody(session: IHTTPSession): JsonObject? {
         return try {
             val files = HashMap<String, String>()
@@ -195,9 +229,10 @@ class HttpServer(
             port: Int,
             compileHandler: CompileHandler,
             testHandler: TestHandler,
-            runConfigHandler: RunConfigHandler
+            runConfigHandler: RunConfigHandler,
+            pluginHandler: PluginHandler
         ): HttpServer {
-            val server = HttpServer(port, compileHandler, testHandler, runConfigHandler)
+            val server = HttpServer(port, compileHandler, testHandler, runConfigHandler, pluginHandler)
             server.start(SOCKET_READ_TIMEOUT, false)
             return server
         }

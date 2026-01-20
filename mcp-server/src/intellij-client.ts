@@ -10,6 +10,8 @@ import {
   RunStopResult,
   RunListResult,
   ProjectListResult,
+  PluginReinstallResult,
+  PluginInfo,
 } from "./types.js";
 
 /**
@@ -121,6 +123,27 @@ export class IntelliJClient {
    */
   async listProjects(): Promise<ProjectListResult> {
     return this.get<ProjectListResult>("/run/projects");
+  }
+
+  /**
+   * Reinstall the MCP Bridge plugin from a zip file
+   */
+  async reinstallPlugin(pluginPath?: string): Promise<PluginReinstallResult> {
+    return this.post<PluginReinstallResult>("/plugin/reinstall", { pluginPath });
+  }
+
+  /**
+   * Restart IntelliJ IDE
+   */
+  async restartIde(): Promise<PluginReinstallResult> {
+    return this.post<PluginReinstallResult>("/plugin/restart", {});
+  }
+
+  /**
+   * Get plugin information
+   */
+  async getPluginInfo(): Promise<PluginInfo> {
+    return this.get<PluginInfo>("/plugin/info");
   }
 
   private async get<T>(path: string): Promise<T> {

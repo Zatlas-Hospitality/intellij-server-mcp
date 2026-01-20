@@ -148,3 +148,23 @@ export interface OpenProjectInfo {
 export interface ProjectListResult {
   projects: OpenProjectInfo[];
 }
+
+/**
+ * Result of plugin reinstall operation
+ */
+export interface PluginReinstallResult {
+  success: boolean;
+  message: string;
+  requiresRestart?: boolean;
+}
+
+/**
+ * Plugin information
+ */
+export interface PluginInfo {
+  pluginId: string;
+  installed: boolean;
+  version?: string;
+  name?: string;
+  enabled: boolean;
+}

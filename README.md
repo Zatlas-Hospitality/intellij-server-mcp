@@ -112,16 +112,21 @@ Arguments:
 - timeout (number, default: 300): Timeout in seconds
 
 Pattern formats:
-- "MyTest" - Run all tests in class MyTest
-- "MyTest#testMethod" - Run specific test method
+- "com.example.MyTest" - Run all tests in fully qualified class (RECOMMENDED)
 - "com.example.*" - Run all tests in package
-- "com.example.MyTest" - Run tests in fully qualified class
+- "com.example.MyTest#testMethod" - Run specific test method
+- "com.example.MyTest$NestedClass#test method name" - Run nested class test (Kotlin)
 ```
 
 Example:
 ```
-intellij_test pattern="UserServiceTest#testCreateUser"
+intellij_test pattern="com.example.UserServiceTest#testCreateUser"
+intellij_test pattern="com.example.MyTest$When doing something#it should work"
 ```
+
+**Known Limitations:**
+- Simple class names (e.g., `MyTest`) may not resolve correctly. Use fully qualified names.
+- Kotlin tests with backtick method names require the `$NestedClass#method name` format.
 
 #### `intellij_errors`
 Get current compilation errors and warnings.
@@ -176,6 +181,23 @@ List all active and recent runs with their status.
 #### `intellij_projects`
 List all open projects in IntelliJ IDEA.
 
+#### `intellij_plugin_reinstall`
+Reinstall the MCP Bridge plugin from a built zip file.
+
+```
+Arguments:
+- pluginPath (string, optional): Custom path to plugin zip file
+  Default: ~/zatlas_projects/mcp-intellij-server/intellij-plugin/build/distributions/intellij-plugin-1.0.0.zip
+
+After reinstall, IntelliJ must be restarted for changes to take effect.
+```
+
+#### `intellij_plugin_restart`
+Restart IntelliJ IDEA to apply plugin changes.
+
+#### `intellij_plugin_info`
+Get information about the installed MCP Bridge plugin (version, status, paths).
+
 ## HTTP API (Plugin)
 
 The IntelliJ plugin exposes the following HTTP endpoints:
@@ -193,6 +215,9 @@ The IntelliJ plugin exposes the following HTTP endpoints:
 | `/run/projects` | GET | List open projects |
 | `/run/{runId}/output` | GET | Get run output (query: `?clear=true`) |
 | `/run/{runId}/stop` | POST | Stop a running process |
+| `/plugin/reinstall` | POST | Reinstall plugin (`{"pluginPath": "..."}`) |
+| `/plugin/restart` | POST | Restart IntelliJ IDE |
+| `/plugin/info` | GET | Get plugin information |
 
 ## Benefits
 
