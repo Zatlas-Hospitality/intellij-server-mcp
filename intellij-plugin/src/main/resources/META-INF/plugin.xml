@@ -1,0 +1,66 @@
+<idea-plugin>
+    <id>com.zatlas.mcpbridge</id>
+    <name>MCP Bridge</name>
+    <version>1.0.0</version>
+    <vendor email="renan@zatlas.com" url="https://zatlas.com">Zatlas</vendor>
+
+    <description><![CDATA[
+        MCP Bridge plugin for IntelliJ IDEA that exposes compilation and test execution
+        through an HTTP API. This allows external tools like Claude Code to leverage
+        IntelliJ's incremental compilation and test runner capabilities.
+
+        <h3>Features:</h3>
+        <ul>
+            <li>HTTP API for triggering incremental compilation</li>
+            <li>HTTP API for running tests with JUnit</li>
+            <li>Real-time error/warning diagnostics</li>
+            <li>Spring context caching through persistent JVM</li>
+        </ul>
+
+        <h3>Endpoints:</h3>
+        <ul>
+            <li>GET /health - Health check</li>
+            <li>POST /compile - Trigger compilation</li>
+            <li>GET /compile/status - Last compile result</li>
+            <li>POST /test - Run tests</li>
+            <li>GET /test/results - Last test results</li>
+            <li>GET /diagnostics - Current errors/warnings</li>
+        </ul>
+    ]]></description>
+
+    <change-notes><![CDATA[
+        <h3>1.0.0</h3>
+        <ul>
+            <li>Initial release</li>
+            <li>HTTP API for compilation and test execution</li>
+            <li>JSON response format</li>
+        </ul>
+    ]]></change-notes>
+
+    <idea-version since-build="251" until-build="253.*"/>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.java</depends>
+    <depends>JUnit</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Application-level service for MCP Bridge -->
+        <applicationService
+            serviceImplementation="com.zatlas.mcpbridge.MCPBridgeService"/>
+
+        <!-- Settings UI -->
+        <applicationConfigurable
+            parentId="build"
+            instance="com.zatlas.mcpbridge.settings.MCPBridgeSettingsConfigurable"
+            id="com.zatlas.mcpbridge.settings"
+            displayName="MCP Bridge"/>
+
+        <!-- Persistent settings storage -->
+        <applicationService
+            serviceImplementation="com.zatlas.mcpbridge.settings.MCPBridgeSettings"/>
+
+        <!-- Startup activity to start the server -->
+        <postStartupActivity
+            implementation="com.zatlas.mcpbridge.MCPBridgeStartupActivity"/>
+    </extensions>
+</idea-plugin>

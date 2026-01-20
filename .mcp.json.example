@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "intellij": {
+      "command": "node",
+      "args": ["/home/renan/zatlas_projects/mcp-intellij-server/mcp-server/dist/index.js"],
+      "env": {
+        "INTELLIJ_PORT": "10082",
+        "INTELLIJ_HOST": "localhost"
+      }
+    }
+  }
+}
