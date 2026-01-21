@@ -12,6 +12,14 @@ import {
   ProjectListResult,
   PluginReinstallResult,
   PluginInfo,
+  DebugSessionsResult,
+  DebugStackResult,
+  DebugVariablesResult,
+  DebugEvaluateResult,
+  DebugStepResult,
+  BreakpointListResult,
+  BreakpointSetResult,
+  BreakpointRemoveResult,
 } from "./types.js";
 
 /**
@@ -64,8 +72,8 @@ export class IntelliJClient {
   /**
    * Run tests matching the given pattern
    */
-  async runTest(pattern: string, timeout: number = 300): Promise<TestResult> {
-    return this.post<TestResult>("/test", { pattern, timeout });
+  async runTest(pattern: string, timeout: number = 300, debug: boolean = false): Promise<TestResult> {
+    return this.post<TestResult>("/test", { pattern, timeout, debug });
   }
 
   /**
@@ -92,8 +100,8 @@ export class IntelliJClient {
   /**
    * Start a run configuration
    */
-  async startRun(configName: string, projectPath?: string): Promise<RunStartResult> {
-    return this.post<RunStartResult>("/run/start", { configName, projectPath });
+  async startRun(configName: string, projectPath?: string, debug: boolean = false): Promise<RunStartResult> {
+    return this.post<RunStartResult>("/run/start", { configName, projectPath, debug });
   }
 
   /**
@@ -144,6 +152,92 @@ export class IntelliJClient {
    */
   async getPluginInfo(): Promise<PluginInfo> {
     return this.get<PluginInfo>("/plugin/info");
+  }
+
+  // Debug methods
+
+  /**
+   * List active debug sessions
+   */
+  async listDebugSessions(): Promise<DebugSessionsResult> {
+    return this.get<DebugSessionsResult>("/debug/sessions");
+  }
+
+  /**
+   * Get current stack frames
+   */
+  async getDebugStack(): Promise<DebugStackResult> {
+    return this.get<DebugStackResult>("/debug/stack");
+  }
+
+  /**
+   * Get variables at current or specified frame
+   */
+  async getDebugVariables(frameIndex: number = 0): Promise<DebugVariablesResult> {
+    return this.get<DebugVariablesResult>(`/debug/variables?frameIndex=${frameIndex}`);
+  }
+
+  /**
+   * Evaluate an expression in the current context
+   */
+  async debugEvaluate(expression: string): Promise<DebugEvaluateResult> {
+    return this.post<DebugEvaluateResult>("/debug/evaluate", { expression });
+  }
+
+  /**
+   * Pause the running debug session
+   */
+  async debugPause(): Promise<DebugStepResult> {
+    return this.post<DebugStepResult>("/debug/pause", {});
+  }
+
+  /**
+   * Resume execution
+   */
+  async debugResume(): Promise<DebugStepResult> {
+    return this.post<DebugStepResult>("/debug/resume", {});
+  }
+
+  /**
+   * Step over current line
+   */
+  async debugStepOver(): Promise<DebugStepResult> {
+    return this.post<DebugStepResult>("/debug/step/over", {});
+  }
+
+  /**
+   * Step into function call
+   */
+  async debugStepInto(): Promise<DebugStepResult> {
+    return this.post<DebugStepResult>("/debug/step/into", {});
+  }
+
+  /**
+   * Step out of current function
+   */
+  async debugStepOut(): Promise<DebugStepResult> {
+    return this.post<DebugStepResult>("/debug/step/out", {});
+  }
+
+  /**
+   * List all breakpoints
+   */
+  async listBreakpoints(): Promise<BreakpointListResult> {
+    return this.get<BreakpointListResult>("/breakpoint/list");
+  }
+
+  /**
+   * Set a breakpoint at file:line
+   */
+  async setBreakpoint(file: string, line: number, condition?: string): Promise<BreakpointSetResult> {
+    return this.post<BreakpointSetResult>("/breakpoint/set", { file, line, condition });
+  }
+
+  /**
+   * Remove a breakpoint at file:line
+   */
+  async removeBreakpoint(file: string, line: number): Promise<BreakpointRemoveResult> {
+    return this.post<BreakpointRemoveResult>("/breakpoint/remove", { file, line });
   }
 
   private async get<T>(path: string): Promise<T> {

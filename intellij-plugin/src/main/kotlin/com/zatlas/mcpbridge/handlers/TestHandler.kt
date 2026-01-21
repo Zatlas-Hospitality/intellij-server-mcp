@@ -3,6 +3,7 @@ package com.zatlas.mcpbridge.handlers
 import com.intellij.execution.ExecutionManager
 import com.intellij.execution.ProgramRunnerUtil
 import com.intellij.execution.RunManager
+import com.intellij.execution.executors.DefaultDebugExecutor
 import com.intellij.execution.executors.DefaultRunExecutor
 import com.intellij.execution.junit.JUnitConfiguration
 import com.intellij.execution.junit.JUnitConfigurationType
@@ -40,7 +41,7 @@ class TestHandler {
      * - "com.example.*" - run all tests in package
      * - "com.example.MyTest" - run tests in fully qualified class
      */
-    fun runTest(pattern: String, timeoutSec: Int): TestResult {
+    fun runTest(pattern: String, timeoutSec: Int, debug: Boolean = false): TestResult {
         val project = getOpenProject()
             ?: return TestResult(
                 success = false,
@@ -71,7 +72,7 @@ class TestHandler {
                         return@invokeLater
                     }
 
-                executeTestConfig(project, config, future, startTime)
+                executeTestConfig(project, config, future, startTime, debug)
             } catch (e: Exception) {
                 log.error("Test execution failed", e)
                 future.complete(TestResult(
@@ -260,10 +261,14 @@ class TestHandler {
         project: Project,
         config: JUnitConfiguration,
         future: CompletableFuture<TestResult>,
-        startTime: Long
+        startTime: Long,
+        debug: Boolean = false
     ) {
         try {
-            val executor = DefaultRunExecutor.getRunExecutorInstance()
+            val executor = if (debug)
+                DefaultDebugExecutor.getDebugExecutorInstance()
+            else
+                DefaultRunExecutor.getRunExecutorInstance()
             val environmentBuilder = ExecutionEnvironmentBuilder.create(executor, config)
             val environment = environmentBuilder.build()
 
@@ -274,6 +279,21 @@ class TestHandler {
                     true,
                     true
                 ) { descriptor ->
+                    // In debug mode, return immediately after starting - don't wait for completion
+                    if (debug) {
+                        future.complete(TestResult(
+                            success = true,
+                            passed = 0,
+                            failed = 0,
+                            skipped = 0,
+                            timeMs = System.currentTimeMillis() - startTime,
+                            tests = emptyList(),
+                            error = null,
+                            debugMessage = "Test started in debug mode. Use debug tools to interact with the debugger."
+                        ))
+                        return@executeConfigurationAsync
+                    }
+
                     // Wait for the process to complete and capture results
                     val handler = descriptor.processHandler
                     handler?.addProcessListener(object : com.intellij.execution.process.ProcessAdapter() {

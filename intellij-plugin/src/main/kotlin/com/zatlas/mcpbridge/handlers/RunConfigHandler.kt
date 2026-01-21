@@ -1,6 +1,7 @@
 package com.zatlas.mcpbridge.handlers
 
 import com.intellij.execution.*
+import com.intellij.execution.executors.DefaultDebugExecutor
 import com.intellij.execution.executors.DefaultRunExecutor
 import com.intellij.execution.process.*
 import com.intellij.execution.runners.ExecutionEnvironmentBuilder
@@ -105,7 +106,7 @@ class RunConfigHandler {
         return ProjectListResult(projects)
     }
 
-    fun startRunConfig(configName: String, projectPath: String? = null): RunStartResult {
+    fun startRunConfig(configName: String, projectPath: String? = null, debug: Boolean = false): RunStartResult {
         val project = findProject(projectPath)
             ?: return RunStartResult(
                 success = false,
@@ -129,7 +130,10 @@ class RunConfigHandler {
                     return@invokeLater
                 }
 
-                val executor = DefaultRunExecutor.getRunExecutorInstance()
+                val executor = if (debug)
+                    DefaultDebugExecutor.getDebugExecutorInstance()
+                else
+                    DefaultRunExecutor.getRunExecutorInstance()
                 val environment = ExecutionEnvironmentBuilder.create(executor, settings).build()
 
                 val runId = "run-${runIdCounter.incrementAndGet()}"

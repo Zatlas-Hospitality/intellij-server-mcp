@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.zatlas.mcpbridge.handlers.CompileHandler
+import com.zatlas.mcpbridge.handlers.DebugHandler
 import com.zatlas.mcpbridge.handlers.PluginHandler
 import com.zatlas.mcpbridge.handlers.RunConfigHandler
 import com.zatlas.mcpbridge.handlers.TestHandler
@@ -15,54 +16,68 @@ class HttpServer(
     private val compileHandler: CompileHandler,
     private val testHandler: TestHandler,
     private val runConfigHandler: RunConfigHandler,
-    private val pluginHandler: PluginHandler
+    private val pluginHandler: PluginHandler,
+    private val debugHandler: DebugHandler
 ) : NanoHTTPD(port) {
 
     private val gson = Gson()
+
+    private data class Route(
+        val method: Method,
+        val path: String,
+        val handler: (IHTTPSession) -> Response,
+        val pathPattern: Regex? = null
+    ) {
+        fun matches(reqMethod: Method, uri: String): Boolean {
+            if (reqMethod != method) return false
+            return pathPattern?.matches(uri) ?: (path == uri)
+        }
+
+        override fun toString(): String = "${method.name} $path"
+    }
+
+    private val routes: List<Route> by lazy {
+        listOf(
+            Route(Method.GET, "/health", { handleHealth() }),
+            Route(Method.POST, "/compile", { handleCompile(it) }),
+            Route(Method.GET, "/compile/status", { handleCompileStatus() }),
+            Route(Method.POST, "/test", { handleTest(it) }),
+            Route(Method.GET, "/test/results", { handleTestResults() }),
+            Route(Method.GET, "/diagnostics", { handleDiagnostics() }),
+            Route(Method.POST, "/run/start", { handleRunStart(it) }),
+            Route(Method.GET, "/run/list", { handleRunList() }),
+            Route(Method.GET, "/run/projects", { handleListProjects() }),
+            Route(Method.GET, "/run/{runId}/output", { s -> handleRunOutput(s, s.uri) }, Regex("/run/[^/]+/output")),
+            Route(Method.POST, "/run/{runId}/stop", { s -> handleRunStop(s.uri) }, Regex("/run/[^/]+/stop")),
+            Route(Method.POST, "/plugin/reinstall", { handlePluginReinstall(it) }),
+            Route(Method.POST, "/plugin/restart", { handlePluginRestart() }),
+            Route(Method.GET, "/plugin/info", { handlePluginInfo() }),
+            Route(Method.GET, "/debug/sessions", { handleDebugSessions() }),
+            Route(Method.GET, "/debug/stack", { handleDebugStack() }),
+            Route(Method.GET, "/debug/variables", { handleDebugVariables(it) }),
+            Route(Method.POST, "/debug/evaluate", { handleDebugEvaluate(it) }),
+            Route(Method.POST, "/debug/pause", { handleDebugPause() }),
+            Route(Method.POST, "/debug/resume", { handleDebugResume() }),
+            Route(Method.POST, "/debug/step/over", { handleDebugStepOver() }),
+            Route(Method.POST, "/debug/step/into", { handleDebugStepInto() }),
+            Route(Method.POST, "/debug/step/out", { handleDebugStepOut() }),
+            Route(Method.GET, "/breakpoint/list", { handleBreakpointList() }),
+            Route(Method.POST, "/breakpoint/set", { handleBreakpointSet(it) }),
+            Route(Method.POST, "/breakpoint/remove", { handleBreakpointRemove(it) })
+        )
+    }
 
     override fun serve(session: IHTTPSession): Response {
         val uri = session.uri
         val method = session.method
 
         return try {
-            when {
-                uri == "/health" && method == Method.GET -> handleHealth()
-                uri == "/compile" && method == Method.POST -> handleCompile(session)
-                uri == "/compile/status" && method == Method.GET -> handleCompileStatus()
-                uri == "/test" && method == Method.POST -> handleTest(session)
-                uri == "/test/results" && method == Method.GET -> handleTestResults()
-                uri == "/diagnostics" && method == Method.GET -> handleDiagnostics()
-                // Run config endpoints
-                uri == "/run/start" && method == Method.POST -> handleRunStart(session)
-                uri == "/run/list" && method == Method.GET -> handleRunList()
-                uri == "/run/projects" && method == Method.GET -> handleListProjects()
-                uri.startsWith("/run/") && uri.endsWith("/output") && method == Method.GET -> handleRunOutput(session, uri)
-                uri.startsWith("/run/") && uri.endsWith("/stop") && method == Method.POST -> handleRunStop(uri)
-                // Plugin management endpoints
-                uri == "/plugin/reinstall" && method == Method.POST -> handlePluginReinstall(session)
-                uri == "/plugin/restart" && method == Method.POST -> handlePluginRestart()
-                uri == "/plugin/info" && method == Method.GET -> handlePluginInfo()
-                else -> jsonResponse(Response.Status.NOT_FOUND, mapOf(
+            routes.firstOrNull { it.matches(method, uri) }?.handler?.invoke(session)
+                ?: jsonResponse(Response.Status.NOT_FOUND, mapOf(
                     "error" to "Not found",
                     "path" to uri,
-                    "availableEndpoints" to listOf(
-                        "GET /health",
-                        "POST /compile",
-                        "GET /compile/status",
-                        "POST /test",
-                        "GET /test/results",
-                        "GET /diagnostics",
-                        "POST /run/start",
-                        "GET /run/list",
-                        "GET /run/projects",
-                        "GET /run/{runId}/output",
-                        "POST /run/{runId}/stop",
-                        "POST /plugin/reinstall",
-                        "POST /plugin/restart",
-                        "GET /plugin/info"
-                    )
+                    "availableEndpoints" to routes.map { it.toString() }
                 ))
-            }
         } catch (e: Exception) {
             jsonResponse(Response.Status.INTERNAL_ERROR, mapOf(
                 "error" to (e.message ?: "Unknown error"),
@@ -75,7 +90,8 @@ class HttpServer(
         return jsonResponse(Response.Status.OK, mapOf(
             "status" to "ok",
             "version" to "1.0.0",
-            "plugin" to "mcp-bridge"
+            "plugin" to "mcp-bridge",
+            "endpoints" to routes.map { it.toString() }
         ))
     }
 
@@ -109,8 +125,9 @@ class HttpServer(
             ))
 
         val timeout = body.get("timeout")?.asInt ?: 300
+        val debug = body.get("debug")?.asBoolean ?: false
 
-        val result = testHandler.runTest(pattern, timeout)
+        val result = testHandler.runTest(pattern, timeout, debug)
         return jsonResponse(
             if (result.success) Response.Status.OK else Response.Status.INTERNAL_ERROR,
             result
@@ -141,8 +158,9 @@ class HttpServer(
                 "error" to "Missing required field: configName"
             ))
         val projectPath = body.get("projectPath")?.asString
+        val debug = body.get("debug")?.asBoolean ?: false
 
-        val result = runConfigHandler.startRunConfig(configName, projectPath)
+        val result = runConfigHandler.startRunConfig(configName, projectPath, debug)
         return jsonResponse(
             if (result.success) Response.Status.OK else Response.Status.INTERNAL_ERROR,
             result
@@ -207,6 +225,131 @@ class HttpServer(
         return jsonResponse(Response.Status.OK, info)
     }
 
+    // Debug handlers
+    private fun handleDebugSessions(): Response {
+        val result = debugHandler.listSessions()
+        return jsonResponse(
+            if (result.success) Response.Status.OK else Response.Status.INTERNAL_ERROR,
+            result
+        )
+    }
+
+    private fun handleDebugStack(): Response {
+        val result = debugHandler.getStack()
+        return jsonResponse(
+            if (result.success) Response.Status.OK else Response.Status.INTERNAL_ERROR,
+            result
+        )
+    }
+
+    private fun handleDebugVariables(session: IHTTPSession): Response {
+        val frameIndex = session.parameters["frameIndex"]?.firstOrNull()?.toIntOrNull() ?: 0
+        val result = debugHandler.getVariables(frameIndex)
+        return jsonResponse(
+            if (result.success) Response.Status.OK else Response.Status.INTERNAL_ERROR,
+            result
+        )
+    }
+
+    private fun handleDebugEvaluate(session: IHTTPSession): Response {
+        val body = parseBody(session)
+        val expression = body?.get("expression")?.asString
+            ?: return jsonResponse(Response.Status.BAD_REQUEST, mapOf(
+                "error" to "Missing required field: expression"
+            ))
+
+        val result = debugHandler.evaluate(expression)
+        return jsonResponse(
+            if (result.success) Response.Status.OK else Response.Status.INTERNAL_ERROR,
+            result
+        )
+    }
+
+    private fun handleDebugPause(): Response {
+        val result = debugHandler.pause()
+        return jsonResponse(
+            if (result.success) Response.Status.OK else Response.Status.INTERNAL_ERROR,
+            result
+        )
+    }
+
+    private fun handleDebugResume(): Response {
+        val result = debugHandler.resume()
+        return jsonResponse(
+            if (result.success) Response.Status.OK else Response.Status.INTERNAL_ERROR,
+            result
+        )
+    }
+
+    private fun handleDebugStepOver(): Response {
+        val result = debugHandler.stepOver()
+        return jsonResponse(
+            if (result.success) Response.Status.OK else Response.Status.INTERNAL_ERROR,
+            result
+        )
+    }
+
+    private fun handleDebugStepInto(): Response {
+        val result = debugHandler.stepInto()
+        return jsonResponse(
+            if (result.success) Response.Status.OK else Response.Status.INTERNAL_ERROR,
+            result
+        )
+    }
+
+    private fun handleDebugStepOut(): Response {
+        val result = debugHandler.stepOut()
+        return jsonResponse(
+            if (result.success) Response.Status.OK else Response.Status.INTERNAL_ERROR,
+            result
+        )
+    }
+
+    private fun handleBreakpointList(): Response {
+        val result = debugHandler.listBreakpoints()
+        return jsonResponse(
+            if (result.success) Response.Status.OK else Response.Status.INTERNAL_ERROR,
+            result
+        )
+    }
+
+    private fun handleBreakpointSet(session: IHTTPSession): Response {
+        val body = parseBody(session)
+        val file = body?.get("file")?.asString
+            ?: return jsonResponse(Response.Status.BAD_REQUEST, mapOf(
+                "error" to "Missing required field: file"
+            ))
+        val line = body.get("line")?.asInt
+            ?: return jsonResponse(Response.Status.BAD_REQUEST, mapOf(
+                "error" to "Missing required field: line"
+            ))
+        val condition = body.get("condition")?.asString
+
+        val result = debugHandler.setBreakpoint(file, line, condition)
+        return jsonResponse(
+            if (result.success) Response.Status.OK else Response.Status.INTERNAL_ERROR,
+            result
+        )
+    }
+
+    private fun handleBreakpointRemove(session: IHTTPSession): Response {
+        val body = parseBody(session)
+        val file = body?.get("file")?.asString
+            ?: return jsonResponse(Response.Status.BAD_REQUEST, mapOf(
+                "error" to "Missing required field: file"
+            ))
+        val line = body.get("line")?.asInt
+            ?: return jsonResponse(Response.Status.BAD_REQUEST, mapOf(
+                "error" to "Missing required field: line"
+            ))
+
+        val result = debugHandler.removeBreakpoint(file, line)
+        return jsonResponse(
+            if (result.success) Response.Status.OK else Response.Status.INTERNAL_ERROR,
+            result
+        )
+    }
+
     private fun parseBody(session: IHTTPSession): JsonObject? {
         return try {
             val files = HashMap<String, String>()
@@ -230,9 +373,10 @@ class HttpServer(
             compileHandler: CompileHandler,
             testHandler: TestHandler,
             runConfigHandler: RunConfigHandler,
-            pluginHandler: PluginHandler
+            pluginHandler: PluginHandler,
+            debugHandler: DebugHandler
         ): HttpServer {
-            val server = HttpServer(port, compileHandler, testHandler, runConfigHandler, pluginHandler)
+            val server = HttpServer(port, compileHandler, testHandler, runConfigHandler, pluginHandler, debugHandler)
             server.start(SOCKET_READ_TIMEOUT, false)
             return server
         }
