@@ -18,6 +18,14 @@ import {
   RunStartResult,
   RunOutputResult,
   RunListResult,
+  DebugSessionsResult,
+  DebugStackResult,
+  DebugVariablesResult,
+  DebugEvaluateResult,
+  DebugStepResult,
+  BreakpointListResult,
+  BreakpointSetResult,
+  BreakpointRemoveResult,
 } from "./types.js";
 
 /**
@@ -130,6 +138,11 @@ For Kotlin tests with backtick method names, use: "FullClass$Nested Class Name#m
                   description: "Timeout in seconds (default: 300)",
                   default: 300,
                 },
+                debug: {
+                  type: "boolean",
+                  description: "Run tests in debug mode with debugger attached (default: false)",
+                  default: false,
+                },
               },
               required: ["pattern"],
             },
@@ -183,6 +196,11 @@ Use intellij_run_list to see all active runs.`,
                 projectPath: {
                   type: "string",
                   description: "Optional project path or name (if multiple projects are open)",
+                },
+                debug: {
+                  type: "boolean",
+                  description: "Start in debug mode with debugger attached (default: false)",
+                  default: false,
                 },
               },
               required: ["configName"],
@@ -278,6 +296,148 @@ After reinstall, IntelliJ must be restarted for changes to take effect.`,
               required: [],
             },
           },
+          // Debug tools
+          {
+            name: "intellij_debug_sessions",
+            description: "List active debug sessions in IntelliJ IDEA.",
+            inputSchema: {
+              type: "object",
+              properties: {},
+              required: [],
+            },
+          },
+          {
+            name: "intellij_debug_pause",
+            description: "Pause the running debug session.",
+            inputSchema: {
+              type: "object",
+              properties: {},
+              required: [],
+            },
+          },
+          {
+            name: "intellij_debug_resume",
+            description: "Resume execution of a paused debug session.",
+            inputSchema: {
+              type: "object",
+              properties: {},
+              required: [],
+            },
+          },
+          {
+            name: "intellij_debug_step_over",
+            description: "Step over the current line in the debugger.",
+            inputSchema: {
+              type: "object",
+              properties: {},
+              required: [],
+            },
+          },
+          {
+            name: "intellij_debug_step_into",
+            description: "Step into the function call at the current line.",
+            inputSchema: {
+              type: "object",
+              properties: {},
+              required: [],
+            },
+          },
+          {
+            name: "intellij_debug_step_out",
+            description: "Step out of the current function.",
+            inputSchema: {
+              type: "object",
+              properties: {},
+              required: [],
+            },
+          },
+          {
+            name: "intellij_debug_stack",
+            description: "Get the current stack frames when the debugger is paused.",
+            inputSchema: {
+              type: "object",
+              properties: {},
+              required: [],
+            },
+          },
+          {
+            name: "intellij_debug_variables",
+            description: "Get variables at the current or specified stack frame.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                frameIndex: {
+                  type: "number",
+                  description: "Stack frame index (0 = top frame, default: 0)",
+                  default: 0,
+                },
+              },
+              required: [],
+            },
+          },
+          {
+            name: "intellij_debug_evaluate",
+            description: "Evaluate an expression in the current debug context.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                expression: {
+                  type: "string",
+                  description: "The expression to evaluate",
+                },
+              },
+              required: ["expression"],
+            },
+          },
+          {
+            name: "intellij_breakpoint_list",
+            description: "List all breakpoints in the project.",
+            inputSchema: {
+              type: "object",
+              properties: {},
+              required: [],
+            },
+          },
+          {
+            name: "intellij_breakpoint_set",
+            description: "Set a breakpoint at the specified file and line.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                file: {
+                  type: "string",
+                  description: "Absolute path to the file",
+                },
+                line: {
+                  type: "number",
+                  description: "Line number (1-based)",
+                },
+                condition: {
+                  type: "string",
+                  description: "Optional condition expression for the breakpoint",
+                },
+              },
+              required: ["file", "line"],
+            },
+          },
+          {
+            name: "intellij_breakpoint_remove",
+            description: "Remove a breakpoint at the specified file and line.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                file: {
+                  type: "string",
+                  description: "Absolute path to the file",
+                },
+                line: {
+                  type: "number",
+                  description: "Line number (1-based)",
+                },
+              },
+              required: ["file", "line"],
+            },
+          },
         ],
       };
     });
@@ -297,7 +457,8 @@ After reinstall, IntelliJ must be restarted for changes to take effect.`,
           case "intellij_test":
             return await this.handleTest(
               args?.pattern as string,
-              args?.timeout as number
+              args?.timeout as number,
+              args?.debug as boolean
             );
 
           case "intellij_errors":
@@ -312,7 +473,8 @@ After reinstall, IntelliJ must be restarted for changes to take effect.`,
           case "intellij_run_start":
             return await this.handleRunStart(
               args?.configName as string,
-              args?.projectPath as string | undefined
+              args?.projectPath as string | undefined,
+              args?.debug as boolean
             );
 
           case "intellij_run_output":
@@ -338,6 +500,50 @@ After reinstall, IntelliJ must be restarted for changes to take effect.`,
 
           case "intellij_plugin_info":
             return await this.handlePluginInfo();
+
+          // Debug tools
+          case "intellij_debug_sessions":
+            return await this.handleDebugSessions();
+
+          case "intellij_debug_pause":
+            return await this.handleDebugPause();
+
+          case "intellij_debug_resume":
+            return await this.handleDebugResume();
+
+          case "intellij_debug_step_over":
+            return await this.handleDebugStepOver();
+
+          case "intellij_debug_step_into":
+            return await this.handleDebugStepInto();
+
+          case "intellij_debug_step_out":
+            return await this.handleDebugStepOut();
+
+          case "intellij_debug_stack":
+            return await this.handleDebugStack();
+
+          case "intellij_debug_variables":
+            return await this.handleDebugVariables(args?.frameIndex as number);
+
+          case "intellij_debug_evaluate":
+            return await this.handleDebugEvaluate(args?.expression as string);
+
+          case "intellij_breakpoint_list":
+            return await this.handleBreakpointList();
+
+          case "intellij_breakpoint_set":
+            return await this.handleBreakpointSet(
+              args?.file as string,
+              args?.line as number,
+              args?.condition as string | undefined
+            );
+
+          case "intellij_breakpoint_remove":
+            return await this.handleBreakpointRemove(
+              args?.file as string,
+              args?.line as number
+            );
 
           default:
             return {
@@ -517,7 +723,7 @@ Warnings: ${result.warnings.length}`,
     }
   }
 
-  private async handleTest(pattern: string, timeout: number = 300) {
+  private async handleTest(pattern: string, timeout: number = 300, debug: boolean = false) {
     if (!pattern) {
       return {
         content: [{ type: "text", text: "Error: pattern is required" }],
@@ -525,8 +731,22 @@ Warnings: ${result.warnings.length}`,
       };
     }
 
-    const result = await this.client.runTest(pattern, timeout);
+    const result = await this.client.runTest(pattern, timeout, debug);
     this.lastTestResult = result;
+
+    // Debug mode - return immediately with debug instructions
+    if (result.debugMessage) {
+      return {
+        content: [{ type: "text", text: `🐛 ${result.debugMessage}
+
+Use these tools to interact with the debugger:
+- intellij_debug_sessions: Check if paused at breakpoint
+- intellij_debug_variables: View variables
+- intellij_debug_evaluate: Evaluate expressions
+- intellij_debug_step_over/into/out: Step through code
+- intellij_debug_resume: Continue execution` }],
+      };
+    }
 
     if (result.success) {
       let summary = `✓ Tests passed (${result.timeMs}ms)
@@ -662,7 +882,7 @@ Summary: ${result.passed} passed, ${result.failed} failed, ${result.skipped} ski
     };
   }
 
-  private async handleRunStart(configName: string, projectPath?: string) {
+  private async handleRunStart(configName: string, projectPath?: string, debug: boolean = false) {
     if (!configName) {
       return {
         content: [{ type: "text", text: "Error: configName is required" }],
@@ -670,7 +890,7 @@ Summary: ${result.passed} passed, ${result.failed} failed, ${result.skipped} ski
       };
     }
 
-    const result = await this.client.startRun(configName, projectPath);
+    const result = await this.client.startRun(configName, projectPath, debug);
 
     if (result.success) {
       return {
@@ -897,6 +1117,278 @@ Note: Connection will be lost during restart. Wait a few seconds and use intelli
         },
       ],
     };
+  }
+
+  // Debug handlers
+
+  private async handleDebugSessions() {
+    const result = await this.client.listDebugSessions();
+
+    if (!result.success) {
+      return {
+        content: [{ type: "text", text: `✗ ${result.error}` }],
+        isError: true,
+      };
+    }
+
+    if (result.sessions.length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "No active debug sessions. Start a test or run configuration with debug=true.",
+          },
+        ],
+      };
+    }
+
+    const sessionList = result.sessions
+      .map((s) => {
+        const status = s.isSuspended ? "⏸ Paused" : "▶ Running";
+        const location = s.currentFile && s.currentLine
+          ? ` at ${s.currentFile}:${s.currentLine}`
+          : "";
+        return `  ${s.sessionName}: ${status}${location}`;
+      })
+      .join("\n");
+
+    return {
+      content: [{ type: "text", text: `Debug sessions:\n${sessionList}` }],
+    };
+  }
+
+  private async handleDebugPause() {
+    const result = await this.client.debugPause();
+    return this.formatStepResult(result);
+  }
+
+  private async handleDebugResume() {
+    const result = await this.client.debugResume();
+    return this.formatStepResult(result);
+  }
+
+  private async handleDebugStepOver() {
+    const result = await this.client.debugStepOver();
+    return this.formatStepResult(result);
+  }
+
+  private async handleDebugStepInto() {
+    const result = await this.client.debugStepInto();
+    return this.formatStepResult(result);
+  }
+
+  private async handleDebugStepOut() {
+    const result = await this.client.debugStepOut();
+    return this.formatStepResult(result);
+  }
+
+  private formatStepResult(result: DebugStepResult) {
+    if (result.success) {
+      return {
+        content: [{ type: "text", text: `✓ ${result.message || result.action}` }],
+      };
+    } else {
+      return {
+        content: [{ type: "text", text: `✗ ${result.error}` }],
+        isError: true,
+      };
+    }
+  }
+
+  private async handleDebugStack() {
+    const result = await this.client.getDebugStack();
+
+    if (!result.success) {
+      return {
+        content: [{ type: "text", text: `✗ ${result.error}` }],
+        isError: true,
+      };
+    }
+
+    if (result.frames.length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Session: ${result.sessionName || "unknown"}\nNo stack frames available.`,
+          },
+        ],
+      };
+    }
+
+    const frameList = result.frames
+      .map((f) => {
+        const marker = f.isTopFrame ? "→ " : "  ";
+        const location = f.file && f.line ? `${f.file}:${f.line}` : "unknown";
+        return `${marker}#${f.index} ${f.functionName || "unknown"} (${location})`;
+      })
+      .join("\n");
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Session: ${result.sessionName || "unknown"}\nStack frames:\n${frameList}`,
+        },
+      ],
+    };
+  }
+
+  private async handleDebugVariables(frameIndex: number = 0) {
+    const result = await this.client.getDebugVariables(frameIndex);
+
+    if (!result.success) {
+      return {
+        content: [{ type: "text", text: `✗ ${result.error}` }],
+        isError: true,
+      };
+    }
+
+    if (result.variables.length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Session: ${result.sessionName || "unknown"}\nNo variables in frame ${result.frameIndex}.`,
+          },
+        ],
+      };
+    }
+
+    const varList = result.variables
+      .map((v) => {
+        const type = v.type ? `: ${v.type}` : "";
+        const children = v.hasChildren ? " {...}" : "";
+        return `  ${v.name}${type} = ${v.value || "null"}${children}`;
+      })
+      .join("\n");
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Session: ${result.sessionName || "unknown"}\nVariables (frame ${result.frameIndex}):\n${varList}`,
+        },
+      ],
+    };
+  }
+
+  private async handleDebugEvaluate(expression: string) {
+    if (!expression) {
+      return {
+        content: [{ type: "text", text: "Error: expression is required" }],
+        isError: true,
+      };
+    }
+
+    const result = await this.client.debugEvaluate(expression);
+
+    if (result.success) {
+      const type = result.type ? ` (${result.type})` : "";
+      const children = result.hasChildren ? " {...}" : "";
+      return {
+        content: [
+          {
+            type: "text",
+            text: `${result.expression} = ${result.result || "null"}${type}${children}`,
+          },
+        ],
+      };
+    } else {
+      return {
+        content: [{ type: "text", text: `✗ ${result.error}` }],
+        isError: true,
+      };
+    }
+  }
+
+  private async handleBreakpointList() {
+    const result = await this.client.listBreakpoints();
+
+    if (!result.success) {
+      return {
+        content: [{ type: "text", text: `✗ ${result.error}` }],
+        isError: true,
+      };
+    }
+
+    if (result.breakpoints.length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "No breakpoints set. Use intellij_breakpoint_set to add breakpoints.",
+          },
+        ],
+      };
+    }
+
+    const bpList = result.breakpoints
+      .map((bp) => {
+        const status = bp.enabled ? "●" : "○";
+        const condition = bp.condition ? ` [if: ${bp.condition}]` : "";
+        return `  ${status} ${bp.file}:${bp.line}${condition}`;
+      })
+      .join("\n");
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Breakpoints:\n${bpList}`,
+        },
+      ],
+    };
+  }
+
+  private async handleBreakpointSet(file: string, line: number, condition?: string) {
+    if (!file || !line) {
+      return {
+        content: [{ type: "text", text: "Error: file and line are required" }],
+        isError: true,
+      };
+    }
+
+    const result = await this.client.setBreakpoint(file, line, condition);
+
+    if (result.success) {
+      const conditionText = condition ? ` with condition: ${condition}` : "";
+      return {
+        content: [
+          {
+            type: "text",
+            text: `✓ Breakpoint set at ${result.file}:${result.line}${conditionText}`,
+          },
+        ],
+      };
+    } else {
+      return {
+        content: [{ type: "text", text: `✗ ${result.error}` }],
+        isError: true,
+      };
+    }
+  }
+
+  private async handleBreakpointRemove(file: string, line: number) {
+    if (!file || !line) {
+      return {
+        content: [{ type: "text", text: "Error: file and line are required" }],
+        isError: true,
+      };
+    }
+
+    const result = await this.client.removeBreakpoint(file, line);
+
+    if (result.success) {
+      return {
+        content: [{ type: "text", text: `✓ ${result.message}` }],
+      };
+    } else {
+      return {
+        content: [{ type: "text", text: `✗ ${result.error}` }],
+        isError: true,
+      };
+    }
   }
 
   async run(): Promise<void> {

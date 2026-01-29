@@ -48,6 +48,7 @@ export interface TestResult {
   timeMs: number;
   tests: TestCaseResult[];
   error?: string;
+  debugMessage?: string;
 }
 
 /**
@@ -167,4 +168,134 @@ export interface PluginInfo {
   version?: string;
   name?: string;
   enabled: boolean;
+}
+
+// Debug types
+
+/**
+ * Debug session information
+ */
+export interface DebugSessionInfo {
+  sessionId: string;
+  sessionName: string;
+  isSuspended: boolean;
+  currentFile?: string;
+  currentLine?: number;
+  projectName: string;
+}
+
+/**
+ * Result of listing debug sessions
+ */
+export interface DebugSessionsResult {
+  success: boolean;
+  sessions: DebugSessionInfo[];
+  error?: string;
+}
+
+/**
+ * Stack frame information
+ */
+export interface StackFrameInfo {
+  index: number;
+  functionName?: string;
+  file?: string;
+  line?: number;
+  isTopFrame: boolean;
+}
+
+/**
+ * Result of getting debug stack
+ */
+export interface DebugStackResult {
+  success: boolean;
+  sessionName?: string;
+  isSuspended: boolean;
+  frames: StackFrameInfo[];
+  error?: string;
+}
+
+/**
+ * Variable information
+ */
+export interface VariableInfo {
+  name: string;
+  value?: string;
+  type?: string;
+  hasChildren: boolean;
+}
+
+/**
+ * Result of getting debug variables
+ */
+export interface DebugVariablesResult {
+  success: boolean;
+  sessionName?: string;
+  frameIndex: number;
+  variables: VariableInfo[];
+  error?: string;
+}
+
+/**
+ * Result of evaluating an expression
+ */
+export interface DebugEvaluateResult {
+  success: boolean;
+  expression: string;
+  result?: string;
+  type?: string;
+  hasChildren: boolean;
+  error?: string;
+}
+
+/**
+ * Result of a debug step action
+ */
+export interface DebugStepResult {
+  success: boolean;
+  action: string;
+  message?: string;
+  error?: string;
+}
+
+/**
+ * Breakpoint information
+ */
+export interface BreakpointInfo {
+  id: string;
+  file: string;
+  line: number;
+  enabled: boolean;
+  condition?: string;
+  logExpression?: string;
+}
+
+/**
+ * Result of listing breakpoints
+ */
+export interface BreakpointListResult {
+  success: boolean;
+  breakpoints: BreakpointInfo[];
+  error?: string;
+}
+
+/**
+ * Result of setting a breakpoint
+ */
+export interface BreakpointSetResult {
+  success: boolean;
+  breakpointId?: string;
+  file?: string;
+  line?: number;
+  message?: string;
+  error?: string;
+}
+
+/**
+ * Result of removing a breakpoint
+ */
+export interface BreakpointRemoveResult {
+  success: boolean;
+  message?: string;
+  error?: string;
 }

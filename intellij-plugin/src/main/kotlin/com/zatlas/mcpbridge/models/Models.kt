@@ -41,7 +41,8 @@ data class TestResult(
     val skipped: Int,
     val timeMs: Long,
     val tests: List<TestCaseResult>,
-    val error: String? = null
+    val error: String? = null,
+    val debugMessage: String? = null
 )
 
 /**
