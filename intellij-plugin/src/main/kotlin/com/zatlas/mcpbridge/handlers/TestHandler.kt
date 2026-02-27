@@ -11,6 +11,8 @@ import com.intellij.execution.testframework.AbstractTestProxy
 import com.intellij.execution.testframework.sm.runner.SMTestProxy
 import com.intellij.execution.testframework.sm.runner.ui.SMTRunnerConsoleView
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.execution.console.ConsoleViewWrapperBase
+import com.intellij.execution.ui.ConsoleViewWithDelegate
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
@@ -370,24 +372,7 @@ class TestHandler {
                     val handler = descriptor.processHandler
                     handler?.addProcessListener(object : com.intellij.execution.process.ProcessAdapter() {
                         override fun processTerminated(event: com.intellij.execution.process.ProcessEvent) {
-                            // Give the test framework time to update results
-                            ApplicationManager.getApplication().invokeLater {
-                                try {
-                                    val result = extractTestResults(descriptor, startTime)
-                                    future.complete(result)
-                                } catch (e: Exception) {
-                                    log.error("Failed to extract test results", e)
-                                    future.complete(TestResult(
-                                        success = false,
-                                        passed = 0,
-                                        failed = 0,
-                                        skipped = 0,
-                                        timeMs = System.currentTimeMillis() - startTime,
-                                        tests = emptyList(),
-                                        error = "Failed to extract test results: ${e.message}"
-                                    ))
-                                }
-                            }
+                            extractWithRetry(descriptor, startTime, future, retryCount = 0)
                         }
                     })
                 }
@@ -416,6 +401,44 @@ class TestHandler {
         }
     }
 
+    private fun extractWithRetry(
+        descriptor: com.intellij.execution.ui.RunContentDescriptor,
+        startTime: Long,
+        future: CompletableFuture<TestResult>,
+        retryCount: Int
+    ) {
+        val maxRetries = 5
+        val delayMs = 200L
+
+        ApplicationManager.getApplication().invokeLater {
+            try {
+                val result = extractTestResults(descriptor, startTime)
+
+                if (result.tests.isEmpty() && result.error != null && retryCount < maxRetries) {
+                    log.info("No test results yet, retrying (${retryCount + 1}/$maxRetries)...")
+                    java.util.Timer().schedule(object : java.util.TimerTask() {
+                        override fun run() {
+                            extractWithRetry(descriptor, startTime, future, retryCount + 1)
+                        }
+                    }, delayMs)
+                } else {
+                    future.complete(result)
+                }
+            } catch (e: Exception) {
+                log.error("Failed to extract test results", e)
+                future.complete(TestResult(
+                    success = false,
+                    passed = 0,
+                    failed = 0,
+                    skipped = 0,
+                    timeMs = System.currentTimeMillis() - startTime,
+                    tests = emptyList(),
+                    error = "Failed to extract test results: ${e.message}"
+                ))
+            }
+        }
+    }
+
     private fun extractTestResults(
         descriptor: com.intellij.execution.ui.RunContentDescriptor,
         startTime: Long
@@ -428,8 +451,12 @@ class TestHandler {
 
         try {
             val console = descriptor.executionConsole
-            if (console is SMTRunnerConsoleView) {
-                val resultsViewer = console.resultsViewer
+            log.info("Execution console type: ${console?.javaClass?.name}")
+
+            val smtConsole = findSMTRunnerConsoleView(console)
+
+            if (smtConsole != null) {
+                val resultsViewer = smtConsole.resultsViewer
                 val root = resultsViewer.root as? SMTestProxy.SMRootTestProxy
 
                 root?.let { rootProxy ->
@@ -438,6 +465,8 @@ class TestHandler {
                     failed = tests.count { it.status == TestStatus.FAILED || it.status == TestStatus.ERROR }
                     skipped = tests.count { it.status == TestStatus.SKIPPED }
                 }
+            } else {
+                log.warn("Could not find SMTRunnerConsoleView. Console type: ${console?.javaClass?.name}")
             }
         } catch (e: Exception) {
             log.warn("Failed to extract detailed test results", e)
@@ -487,6 +516,23 @@ class TestHandler {
             timeMs = timeMs,
             tests = tests
         )
+    }
+
+    private fun findSMTRunnerConsoleView(console: com.intellij.execution.ui.ExecutionConsole?): SMTRunnerConsoleView? {
+        var current = console
+        while (current != null) {
+            if (current is SMTRunnerConsoleView) return current
+            if (current is ConsoleViewWithDelegate) {
+                current = current.delegate
+                continue
+            }
+            if (current is ConsoleViewWrapperBase) {
+                current = current.delegate
+                continue
+            }
+            break
+        }
+        return null
     }
 
     private fun collectTestResults(proxy: AbstractTestProxy, results: MutableList<TestCaseResult>) {
