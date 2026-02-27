@@ -79,6 +79,31 @@ class RunConfigHandler {
     private val activeRuns = ConcurrentHashMap<String, RunInfo>()
     private val runIdCounter = AtomicInteger(0)
 
+    companion object {
+        private const val MAX_OUTPUT_SIZE = 1_000_000  // 1MB max output per run
+    }
+
+    /**
+     * Reset handler state - clears all tracked runs and frees memory
+     */
+    fun reset() {
+        log.info("Resetting RunConfigHandler state - clearing ${activeRuns.size} tracked runs")
+        // Stop any running processes
+        activeRuns.values.forEach { runInfo ->
+            try {
+                runInfo.processHandler?.let { handler ->
+                    if (!handler.isProcessTerminated) {
+                        handler.destroyProcess()
+                    }
+                }
+            } catch (e: Exception) {
+                log.warn("Failed to stop process for run ${runInfo.id}", e)
+            }
+        }
+        activeRuns.clear()
+        log.info("RunConfigHandler reset complete")
+    }
+
     private fun findProject(projectPath: String?): Project? {
         val openProjects = ProjectManager.getInstance().openProjects
 
@@ -147,7 +172,18 @@ class RunConfigHandler {
 
                         processHandler?.addProcessListener(object : ProcessListener {
                             override fun onTextAvailable(event: ProcessEvent, outputType: Key<*>) {
-                                runInfo.output.append(event.text)
+                                synchronized(runInfo.output) {
+                                    // Limit output size to prevent OOM
+                                    if (runInfo.output.length < MAX_OUTPUT_SIZE) {
+                                        val remainingCapacity = MAX_OUTPUT_SIZE - runInfo.output.length
+                                        val textToAppend = if (event.text.length > remainingCapacity) {
+                                            event.text.substring(0, remainingCapacity) + "\n... [output truncated]"
+                                        } else {
+                                            event.text
+                                        }
+                                        runInfo.output.append(textToAppend)
+                                    }
+                                }
                             }
 
                             override fun processTerminated(event: ProcessEvent) {

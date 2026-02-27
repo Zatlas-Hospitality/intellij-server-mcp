@@ -57,6 +57,7 @@ class IntelliJMCPServer {
     return {
       intellijPort: parseInt(process.env.INTELLIJ_PORT || "10082"),
       intellijHost: process.env.INTELLIJ_HOST || "localhost",
+      intellijProject: process.cwd(),
     };
   }
 
@@ -438,14 +439,24 @@ After reinstall, IntelliJ must be restarted for changes to take effect.`,
   }
 
   private async handleStatus() {
-    const status = await this.client.checkConnection();
+    const status = await this.client.checkConnection(this.config.intellijProject);
 
     if (status.connected) {
+      let projectInfo = "";
+      if (status.targetProject) {
+        projectInfo = `\nTarget project: ${status.targetProject.name} (${status.targetProject.basePath})`;
+      } else if (this.config.intellijProject) {
+        projectInfo = `\n⚠ Project not found: ${this.config.intellijProject}`;
+        if (status.openProjects && status.openProjects.length > 0) {
+          projectInfo += `\nOpen projects: ${status.openProjects.map(p => p.name).join(", ")}`;
+        }
+      }
+
       return {
         content: [
           {
             type: "text",
-            text: `✓ Connected to IntelliJ IDEA at ${status.host}:${status.port}`,
+            text: `✓ Connected to IntelliJ IDEA at ${status.host}:${status.port}${projectInfo}`,
           },
         ],
       };
@@ -471,7 +482,7 @@ Make sure:
   }
 
   private async handleCompile(incremental: boolean = true) {
-    const result = await this.client.compile(incremental);
+    const result = await this.client.compile(incremental, this.config.intellijProject);
     this.lastCompileResult = result;
 
     if (result.success) {
@@ -525,7 +536,7 @@ Warnings: ${result.warnings.length}`,
       };
     }
 
-    const result = await this.client.runTest(pattern, timeout);
+    const result = await this.client.runTest(pattern, timeout, this.config.intellijProject);
     this.lastTestResult = result;
 
     if (result.success) {

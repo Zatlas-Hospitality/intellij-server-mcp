@@ -4,6 +4,7 @@
 export interface ServerConfig {
   intellijPort: number;
   intellijHost: string;
+  intellijProject?: string;
 }
 
 /**
@@ -64,12 +65,23 @@ export interface TestCaseResult {
 }
 
 /**
+ * Project info
+ */
+export interface ProjectInfo {
+  name: string;
+  basePath?: string;
+}
+
+/**
  * Health check response
  */
 export interface HealthResponse {
   status: string;
   version: string;
   plugin: string;
+  openProjects?: ProjectInfo[];
+  targetProject?: ProjectInfo;
+  projectFound?: boolean;
 }
 
 /**
@@ -80,6 +92,9 @@ export interface ConnectionStatus {
   host: string;
   port: number;
   error?: string;
+  targetProject?: ProjectInfo;
+  projectFound?: boolean;
+  openProjects?: ProjectInfo[];
 }
 
 /**
