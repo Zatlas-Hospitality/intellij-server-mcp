@@ -26,7 +26,8 @@ class HttpServer(
 
         return try {
             when {
-                uri == "/health" && method == Method.GET -> handleHealth()
+                uri == "/health" && method == Method.GET -> handleHealth(session)
+                uri == "/reset" && method == Method.POST -> handleReset()
                 uri == "/compile" && method == Method.POST -> handleCompile(session)
                 uri == "/compile/status" && method == Method.GET -> handleCompileStatus()
                 uri == "/test" && method == Method.POST -> handleTest(session)
@@ -47,6 +48,7 @@ class HttpServer(
                     "path" to uri,
                     "availableEndpoints" to listOf(
                         "GET /health",
+                        "POST /reset",
                         "POST /compile",
                         "GET /compile/status",
                         "POST /test",
@@ -71,19 +73,57 @@ class HttpServer(
         }
     }
 
-    private fun handleHealth(): Response {
+    private fun handleHealth(session: IHTTPSession): Response {
+        val projectPath = session.parms["projectPath"]
+        val openProjects = com.intellij.openapi.project.ProjectManager.getInstance().openProjects
+
+        val targetProject = if (projectPath.isNullOrBlank()) {
+            openProjects.firstOrNull()
+        } else {
+            openProjects.find { project ->
+                project.basePath == projectPath ||
+                project.basePath?.endsWith(projectPath) == true ||
+                project.name == projectPath ||
+                project.name.equals(projectPath, ignoreCase = true)
+            }
+        }
+
         return jsonResponse(Response.Status.OK, mapOf(
             "status" to "ok",
             "version" to "1.0.0",
-            "plugin" to "mcp-bridge"
+            "plugin" to "mcp-bridge",
+            "openProjects" to openProjects.map { mapOf("name" to it.name, "basePath" to it.basePath) },
+            "targetProject" to targetProject?.let { mapOf("name" to it.name, "basePath" to it.basePath) },
+            "projectFound" to (targetProject != null),
+            "requestedProjectPath" to projectPath
         ))
+    }
+
+    private fun handleReset(): Response {
+        return try {
+            compileHandler.reset()
+            testHandler.reset()
+            runConfigHandler.reset()
+            jsonResponse(Response.Status.OK, mapOf(
+                "status" to "reset",
+                "message" to "All handlers reset successfully",
+                "compileLocked" to compileHandler.isLocked(),
+                "testLocked" to testHandler.isLocked()
+            ))
+        } catch (e: Exception) {
+            jsonResponse(Response.Status.INTERNAL_ERROR, mapOf(
+                "error" to "Reset failed: ${e.message}",
+                "type" to e.javaClass.simpleName
+            ))
+        }
     }
 
     private fun handleCompile(session: IHTTPSession): Response {
         val body = parseBody(session)
         val incremental = body?.get("incremental")?.asBoolean ?: true
+        val projectPath = body?.get("projectPath")?.asString
 
-        val result = compileHandler.compile(incremental)
+        val result = compileHandler.compile(incremental, projectPath)
         return jsonResponse(
             if (result.success) Response.Status.OK else Response.Status.INTERNAL_ERROR,
             result
@@ -109,8 +149,9 @@ class HttpServer(
             ))
 
         val timeout = body.get("timeout")?.asInt ?: 300
+        val projectPath = body.get("projectPath")?.asString
 
-        val result = testHandler.runTest(pattern, timeout)
+        val result = testHandler.runTest(pattern, timeout, projectPath)
         return jsonResponse(
             if (result.success) Response.Status.OK else Response.Status.INTERNAL_ERROR,
             result

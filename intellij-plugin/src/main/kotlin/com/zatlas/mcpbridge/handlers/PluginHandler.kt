@@ -17,7 +17,7 @@ class PluginHandler {
     companion object {
         const val PLUGIN_ID = "com.zatlas.mcpbridge"
         val DEFAULT_PLUGIN_PATH = System.getProperty("user.home") +
-            "/zatlas_projects/mcp-intellij-server/intellij-plugin/build/distributions/intellij-plugin-1.0.0.zip"
+            "/zatlas_projects/mcp-intellij-server/intellij-plugin/build/distributions/mcp-bridge-1.1.0.zip"
     }
 
     data class ReinstallResult(

@@ -22,9 +22,11 @@ import com.intellij.psi.search.GlobalSearchScope
 import com.zatlas.mcpbridge.models.TestCaseResult
 import com.zatlas.mcpbridge.models.TestResult
 import com.zatlas.mcpbridge.models.TestStatus
+import com.intellij.openapi.compiler.CompilerManager
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import java.util.concurrent.locks.ReentrantLock
 
 class TestHandler {
 
@@ -32,6 +34,65 @@ class TestHandler {
 
     @Volatile
     private var lastResults: TestResult? = null
+
+    companion object {
+        private val testLock = ReentrantLock()
+        private const val MAX_WAIT_FOR_LOCK_MS = 30_000L  // 30 seconds for lock
+        private const val MAX_WAIT_FOR_DAEMON_MS = 60_000L  // 1 minute for compilation
+        private const val POLL_INTERVAL_MS = 500L
+    }
+
+    /**
+     * Reset handler state - use for recovery after errors
+     */
+    fun reset() {
+        log.info("Resetting TestHandler state")
+        lastResults = null
+        if (testLock.isHeldByCurrentThread) {
+            testLock.unlock()
+            log.info("Released test lock held by current thread")
+        }
+        if (testLock.tryLock()) {
+            testLock.unlock()
+            log.info("Test lock is available")
+        } else {
+            log.warn("Test lock is held by another thread - may need IDE restart")
+        }
+    }
+
+    /**
+     * Check if tests are currently locked
+     */
+    fun isLocked(): Boolean = testLock.isLocked
+
+    /**
+     * Check if any project has an active compilation
+     */
+    private fun isAnyCompilationActive(): Boolean {
+        return ProjectManager.getInstance().openProjects.any { project ->
+            try {
+                CompilerManager.getInstance(project).isCompilationActive
+            } catch (e: Exception) {
+                false
+            }
+        }
+    }
+
+    /**
+     * Wait for any active compilation to finish
+     */
+    private fun waitForCompilationToFinish(): Boolean {
+        val startWait = System.currentTimeMillis()
+        while (isAnyCompilationActive()) {
+            if (System.currentTimeMillis() - startWait > MAX_WAIT_FOR_DAEMON_MS) {
+                log.warn("Timed out waiting for active compilation to finish")
+                return false
+            }
+            log.info("Waiting for active compilation to finish before running tests...")
+            Thread.sleep(POLL_INTERVAL_MS)
+        }
+        return true
+    }
 
     /**
      * Run tests matching the given pattern
@@ -42,8 +103,8 @@ class TestHandler {
      * - "com.example.*" - run all tests in package
      * - "com.example.MyTest" - run tests in fully qualified class
      */
-    fun runTest(pattern: String, timeoutSec: Int): TestResult {
-        val project = getOpenProject()
+    fun runTest(pattern: String, timeoutSec: Int, projectPath: String? = null): TestResult {
+        val project = findProject(projectPath)
             ?: return TestResult(
                 success = false,
                 passed = 0,
@@ -51,11 +112,39 @@ class TestHandler {
                 skipped = 0,
                 timeMs = 0,
                 tests = emptyList(),
-                error = "No project open in IntelliJ"
+                error = "No project open in IntelliJ${projectPath?.let { " matching: $it" } ?: ""}"
             )
 
-        val future = CompletableFuture<TestResult>()
-        val startTime = System.currentTimeMillis()
+        if (!testLock.tryLock(MAX_WAIT_FOR_LOCK_MS, TimeUnit.MILLISECONDS)) {
+            return TestResult(
+                success = false,
+                passed = 0,
+                failed = 0,
+                skipped = 0,
+                timeMs = 0,
+                tests = emptyList(),
+                error = "Timed out waiting for test lock (${MAX_WAIT_FOR_LOCK_MS}ms) - another test may be stuck. Try POST /reset to recover."
+            )
+        }
+
+        // Clear previous results to free memory
+        lastResults = null
+
+        try {
+            if (!waitForCompilationToFinish()) {
+                return TestResult(
+                    success = false,
+                    passed = 0,
+                    failed = 0,
+                    skipped = 0,
+                    timeMs = 0,
+                    tests = emptyList(),
+                    error = "Timed out waiting for active compilation to finish"
+                )
+            }
+
+            val future = CompletableFuture<TestResult>()
+            val startTime = System.currentTimeMillis()
 
         ApplicationManager.getApplication().invokeLater {
             try {
@@ -88,30 +177,33 @@ class TestHandler {
             }
         }
 
-        return try {
-            val result = future.get(timeoutSec.toLong(), TimeUnit.SECONDS)
-            lastResults = result
-            result
-        } catch (e: TimeoutException) {
-            TestResult(
-                success = false,
-                passed = 0,
-                failed = 0,
-                skipped = 0,
-                timeMs = timeoutSec * 1000L,
-                tests = emptyList(),
-                error = "Test execution timed out after $timeoutSec seconds"
-            )
-        } catch (e: Exception) {
-            TestResult(
-                success = false,
-                passed = 0,
-                failed = 0,
-                skipped = 0,
-                timeMs = System.currentTimeMillis() - startTime,
-                tests = emptyList(),
-                error = e.message ?: "Test execution failed"
-            )
+            return try {
+                val result = future.get(timeoutSec.toLong(), TimeUnit.SECONDS)
+                lastResults = result
+                result
+            } catch (e: TimeoutException) {
+                TestResult(
+                    success = false,
+                    passed = 0,
+                    failed = 0,
+                    skipped = 0,
+                    timeMs = timeoutSec * 1000L,
+                    tests = emptyList(),
+                    error = "Test execution timed out after $timeoutSec seconds"
+                )
+            } catch (e: Exception) {
+                TestResult(
+                    success = false,
+                    passed = 0,
+                    failed = 0,
+                    skipped = 0,
+                    timeMs = System.currentTimeMillis() - startTime,
+                    tests = emptyList(),
+                    error = e.message ?: "Test execution failed"
+                )
+            }
+        } finally {
+            testLock.unlock()
         }
     }
 
@@ -495,7 +587,16 @@ class TestHandler {
         return Pair(parentName ?: "Unknown", testName)
     }
 
-    private fun getOpenProject(): Project? {
-        return ProjectManager.getInstance().openProjects.firstOrNull()
+    private fun findProject(projectPath: String?): Project? {
+        val openProjects = ProjectManager.getInstance().openProjects
+        if (projectPath.isNullOrBlank()) {
+            return openProjects.firstOrNull()
+        }
+        return openProjects.find { project ->
+            project.basePath == projectPath ||
+            project.basePath?.endsWith(projectPath) == true ||
+            project.name == projectPath ||
+            project.name.equals(projectPath, ignoreCase = true)
+        } ?: openProjects.firstOrNull()
     }
 }

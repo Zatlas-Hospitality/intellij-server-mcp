@@ -29,13 +29,17 @@ export class IntelliJClient {
   /**
    * Check connection to IntelliJ
    */
-  async checkConnection(): Promise<ConnectionStatus> {
+  async checkConnection(projectPath?: string): Promise<ConnectionStatus> {
     try {
-      const response = await this.get<HealthResponse>("/health");
+      const queryParam = projectPath ? `?projectPath=${encodeURIComponent(projectPath)}` : "";
+      const response = await this.get<HealthResponse>(`/health${queryParam}`);
       return {
         connected: response.status === "ok",
         host: this.config.intellijHost,
         port: this.config.intellijPort,
+        targetProject: response.targetProject,
+        projectFound: response.projectFound,
+        openProjects: response.openProjects,
       };
     } catch (error) {
       return {
@@ -50,8 +54,8 @@ export class IntelliJClient {
   /**
    * Trigger compilation in IntelliJ
    */
-  async compile(incremental: boolean = true): Promise<CompileResult> {
-    return this.post<CompileResult>("/compile", { incremental });
+  async compile(incremental: boolean = true, projectPath?: string): Promise<CompileResult> {
+    return this.post<CompileResult>("/compile", { incremental, projectPath });
   }
 
   /**
@@ -64,8 +68,8 @@ export class IntelliJClient {
   /**
    * Run tests matching the given pattern
    */
-  async runTest(pattern: string, timeout: number = 300): Promise<TestResult> {
-    return this.post<TestResult>("/test", { pattern, timeout });
+  async runTest(pattern: string, timeout: number = 300, projectPath?: string): Promise<TestResult> {
+    return this.post<TestResult>("/test", { pattern, timeout, projectPath });
   }
 
   /**
