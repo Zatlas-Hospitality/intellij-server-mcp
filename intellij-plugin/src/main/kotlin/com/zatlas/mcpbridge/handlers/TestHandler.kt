@@ -564,7 +564,8 @@ class TestHandler {
                 status = status,
                 timeMs = proxy.duration ?: 0,
                 message = smProxy?.errorMessage,
-                stackTrace = smProxy?.stacktrace
+                stackTrace = smProxy?.stacktrace,
+                rootCause = extractRootCause(smProxy?.stacktrace, smProxy?.errorMessage)
             ))
         } else {
             // This is a test suite, recurse into children
@@ -585,6 +586,18 @@ class TestHandler {
 
         // Fallback: use parent as class name and test name as method
         return Pair(parentName ?: "Unknown", testName)
+    }
+
+    private fun extractRootCause(stackTrace: String?, errorMessage: String?): String? {
+        if (stackTrace != null) {
+            val causedByLines = stackTrace.lines().filter { it.trimStart().startsWith("Caused by:") }
+            if (causedByLines.isNotEmpty()) {
+                return causedByLines.last().trim()
+            }
+        }
+        return errorMessage?.let { msg ->
+            if (msg.length > 200) msg.substring(0, 200) + "..." else msg
+        }
     }
 
     private fun findProject(projectPath: String?): Project? {
