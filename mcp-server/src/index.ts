@@ -161,7 +161,12 @@ For Kotlin tests with backtick method names, use: "FullClass$Nested Class Name#m
               "Get the detailed results of the last test run. Includes pass/fail counts and failure messages.",
             inputSchema: {
               type: "object",
-              properties: {},
+              properties: {
+                testName: {
+                  type: "string",
+                  description: "Optional test name (or substring) to get full details including complete stack trace for a specific test. When omitted, returns concise summary of all tests with rootCause only.",
+                },
+              },
               required: [],
             },
           },
@@ -308,7 +313,7 @@ After reinstall, IntelliJ must be restarted for changes to take effect.`,
             return await this.handleCompileStatus();
 
           case "intellij_test_results":
-            return await this.handleTestResults();
+            return await this.handleTestResults(args?.testName as string | undefined);
 
           case "intellij_run_start":
             return await this.handleRunStart(
@@ -559,7 +564,11 @@ Summary: ${result.passed} passed`;
       if (failures.length > 0) {
         failureDetails = "\n\nFailures:\n" + failures.map((f) => {
           let detail = `  ${f.className}#${f.methodName}`;
-          if (f.message) detail += `\n    ${f.message}`;
+          if (f.rootCause) {
+            detail += `\n    Root cause: ${f.rootCause}`;
+          } else if (f.message) {
+            detail += `\n    ${f.message}`;
+          }
           if (f.stackTrace) {
             // Show first few lines of stack trace
             const lines = f.stackTrace.split("\n").slice(0, 5);
@@ -652,7 +661,7 @@ Summary: ${result.passed} passed, ${result.failed} failed, ${result.skipped} ski
     };
   }
 
-  private async handleTestResults() {
+  private async handleTestResults(testName?: string) {
     const result = await this.client.getTestResults();
 
     if ("status" in result && result.status === "no_tests_run_yet") {
@@ -663,11 +672,42 @@ Summary: ${result.passed} passed, ${result.failed} failed, ${result.skipped} ski
       };
     }
 
+    if (testName) {
+      const needle = testName.toLowerCase();
+      const match = (result as any).tests?.find((t: any) =>
+        t.name?.toLowerCase().includes(needle) ||
+        t.methodName?.toLowerCase().includes(needle)
+      );
+      if (match) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(match, null, 2) }],
+        };
+      }
+      const available = (result as any).tests?.map((t: any) => t.name) || [];
+      return {
+        content: [{ type: "text", text: `No test matching "${testName}". Available tests:\n${available.map((n: string) => `  - ${n}`).join("\n")}` }],
+        isError: true,
+      };
+    }
+
+    // Concise summary: strip stackTrace and message to avoid huge output
+    const concise = {
+      ...(result as any),
+      tests: (result as any).tests?.map((t: any) => ({
+        name: t.name,
+        className: t.className,
+        methodName: t.methodName,
+        status: t.status,
+        timeMs: t.timeMs,
+        rootCause: t.rootCause,
+      })),
+    };
+
     return {
       content: [
         {
           type: "text",
-          text: JSON.stringify(result, null, 2),
+          text: JSON.stringify(concise, null, 2),
         },
       ],
     };

@@ -54,7 +54,8 @@ data class TestCaseResult(
     val status: TestStatus,
     val timeMs: Long,
     val message: String? = null,
-    val stackTrace: String? = null
+    val stackTrace: String? = null,
+    val rootCause: String? = null
 )
 
 /**
