@@ -62,6 +62,7 @@ export interface TestCaseResult {
   timeMs: number;
   message?: string;
   stackTrace?: string;
+  rootCause?: string;
 }
 
 /**
